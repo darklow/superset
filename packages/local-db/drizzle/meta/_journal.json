@@ -278,6 +278,13 @@
     {
       "idx": 39,
       "version": "6",
+      "when": 1774297525726,
+      "tag": "0038_add_copy_on_select_setting",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
       "when": 1775426374468,
       "tag": "0039_add_tab_placement_setting",
       "breakpoints": true
