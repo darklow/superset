@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "56204eef-15c0-4fa7-bd7f-24018ea37060",
-  "prevId": "c4874a39-c07e-4a7f-9f98-44e3c578dee0",
+  "id": "f710d195-fa69-402c-803f-fc3ba1099e56",
+  "prevId": "1cf43ce9-9e0f-44c4-b4cf-5cafe80bf78d",
   "tables": {
     "browser_history": {
       "name": "browser_history",
@@ -495,13 +495,6 @@
           "autoincrement": false,
           "default": true
         },
-        "copy_on_select": {
-          "name": "copy_on_select",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "auto_apply_default_preset": {
           "name": "auto_apply_default_preset",
           "type": "integer",
@@ -525,6 +518,13 @@
         },
         "notification_sounds_muted": {
           "name": "notification_sounds_muted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "notification_volume": {
+          "name": "notification_volume",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -609,6 +609,13 @@
         },
         "default_editor": {
           "name": "default_editor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "tab_placement": {
+          "name": "tab_placement",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
