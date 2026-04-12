@@ -363,21 +363,32 @@ export function setupCopyHandler(xterm: XTerm): () => void {
 /**
  * Setup copy-on-select: automatically write selected text to the clipboard
  * whenever the terminal selection changes (like Ghostty's copy-on-select = clipboard).
+ * Debounced to avoid flooding the macOS system pasteboard during drag-select,
+ * which can starve system event dispatch and freeze input across all apps.
  */
 export function setupCopyOnSelect(xterm: XTerm): () => void {
+	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 	const disposable = xterm.onSelectionChange(() => {
-		const selection = xterm.getSelection();
-		if (!selection) return;
+		if (debounceTimer) clearTimeout(debounceTimer);
 
-		const trimmedText = selection
-			.split("\n")
-			.map((line) => line.trimEnd())
-			.join("\n");
+		debounceTimer = setTimeout(() => {
+			const selection = xterm.getSelection();
+			if (!selection) return;
 
-		void navigator.clipboard?.writeText(trimmedText).catch(() => {});
+			const trimmedText = selection
+				.split("\n")
+				.map((line) => line.trimEnd())
+				.join("\n");
+
+			void navigator.clipboard?.writeText(trimmedText).catch(() => {});
+		}, 150);
 	});
 
-	return () => disposable.dispose();
+	return () => {
+		if (debounceTimer) clearTimeout(debounceTimer);
+		disposable.dispose();
+	};
 }
 
 /**
