@@ -1,1 +1,1 @@
-export { isTerminalReservedEvent } from "./utils";
+export { isAppHotkeyEvent, isTerminalReservedEvent } from "./utils";
