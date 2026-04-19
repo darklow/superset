@@ -86,6 +86,11 @@ export function getUpdateStatus(): AutoUpdateStatusEvent {
 }
 
 export function installUpdate(): void {
+	if (env.DISABLE_AUTO_UPDATE) {
+		console.info("[auto-updater] Install skipped: DISABLE_AUTO_UPDATE set");
+		emitStatus(AUTO_UPDATE_STATUS.IDLE);
+		return;
+	}
 	if (env.NODE_ENV === "development") {
 		console.info("[auto-updater] Install skipped in dev mode");
 		emitStatus(AUTO_UPDATE_STATUS.IDLE);
@@ -102,6 +107,9 @@ export function dismissUpdate(): void {
 }
 
 export function checkForUpdates(): void {
+	if (env.DISABLE_AUTO_UPDATE) {
+		return;
+	}
 	if (env.NODE_ENV === "development" || !IS_AUTO_UPDATE_PLATFORM) {
 		return;
 	}
@@ -119,6 +127,14 @@ export function checkForUpdates(): void {
 }
 
 export function checkForUpdatesInteractive(): void {
+	if (env.DISABLE_AUTO_UPDATE) {
+		dialog.showMessageBox({
+			type: "info",
+			title: "Updates",
+			message: "Auto-updates are disabled in this build.",
+		});
+		return;
+	}
 	if (env.NODE_ENV === "development") {
 		dialog.showMessageBox({
 			type: "info",
@@ -200,6 +216,10 @@ export function simulateError(): void {
 }
 
 export function setupAutoUpdater(): void {
+	if (env.DISABLE_AUTO_UPDATE) {
+		console.info("[auto-updater] Disabled via DISABLE_AUTO_UPDATE env var");
+		return;
+	}
 	if (env.NODE_ENV === "development" || !IS_AUTO_UPDATE_PLATFORM) {
 		return;
 	}

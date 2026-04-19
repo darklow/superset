@@ -25,6 +25,10 @@ export const env = createEnv({
 		NEXT_PUBLIC_POSTHOG_HOST: z.string().default("https://us.i.posthog.com"),
 		SENTRY_DSN_DESKTOP: z.string().optional(),
 		STREAMS_URL: z.url().default("https://superset-stream.fly.dev"),
+		DISABLE_AUTO_UPDATE: z
+			.enum(["0", "1", "true", "false"])
+			.default("0")
+			.transform((v) => v === "1" || v === "true"),
 	},
 
 	runtimeEnv: {
@@ -41,6 +45,7 @@ export const env = createEnv({
 		NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST,
 		SENTRY_DSN_DESKTOP: process.env.SENTRY_DSN_DESKTOP,
 		STREAMS_URL: process.env.STREAMS_URL,
+		DISABLE_AUTO_UPDATE: process.env.DISABLE_AUTO_UPDATE,
 	},
 	emptyStringAsUndefined: true,
 	// Only allow skipping validation in development (never in production)
