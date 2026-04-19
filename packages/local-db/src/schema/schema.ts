@@ -225,6 +225,9 @@ export const settings = sqliteTable("settings", {
 	openLinksInApp: integer("open_links_in_app", { mode: "boolean" }),
 	defaultEditor: text("default_editor").$type<ExternalApp>(),
 	tabPlacement: text("tab_placement").$type<TabPlacement>(),
+	exposeHostServiceViaRelay: integer("expose_host_service_via_relay", {
+		mode: "boolean",
+	}),
 });
 
 export type InsertSettings = typeof settings.$inferInsert;

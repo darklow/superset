@@ -1,22 +1,44 @@
 import { cn } from "@superset/ui/utils";
+import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
+import type { Pane } from "../../../types";
 import type { WorkspaceProps } from "../../types";
 import { Tab } from "./components/Tab";
 import { TabBar } from "./components/TabBar";
+import { resolveTabTitle } from "./utils/resolveTabTitle";
 
 export function Workspace<TData>({
 	store,
 	registry,
 	className,
 	renderTabAccessory,
+	renderTabIcon,
 	renderEmptyState,
 	renderAddTabMenu,
+	renderBelowTabBar,
 	onBeforeCloseTab,
 	paneActions,
+	contextMenuActions,
 }: WorkspaceProps<TData>) {
 	const tabs = useStore(store, (s) => s.tabs);
 	const activeTabId = useStore(store, (s) => s.activeTabId);
 	const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+
+	const previousPanesRef = useRef<Map<string, Pane<TData>>>(new Map());
+	useEffect(() => {
+		const current = new Map<string, Pane<TData>>();
+		for (const tab of tabs) {
+			for (const pane of Object.values(tab.panes)) {
+				current.set(pane.id, pane);
+			}
+		}
+		for (const [prevId, prevPane] of previousPanesRef.current) {
+			if (!current.has(prevId)) {
+				registry[prevPane.kind]?.onRemoved?.(prevPane);
+			}
+		}
+		previousPanesRef.current = current;
+	}, [tabs, registry]);
 
 	const closeTab = async (tabId: string) => {
 		if (onBeforeCloseTab) {
@@ -56,16 +78,19 @@ export function Workspace<TData>({
 				onReorderTab={(tabId, toIndex) =>
 					store.getState().reorderTab({ tabId, toIndex })
 				}
-				getTabTitle={(tab) => tab.titleOverride ?? tab.id}
+				getTabTitle={(tab) => resolveTabTitle(tab, tabs, registry)}
+				renderTabIcon={renderTabIcon}
 				renderAddTabMenu={renderAddTabMenu}
 				renderTabAccessory={renderTabAccessory}
 			/>
+			{renderBelowTabBar?.()}
 			{activeTab ? (
 				<Tab
 					store={store}
 					tab={activeTab}
 					registry={registry}
 					paneActions={paneActions}
+					contextMenuActions={contextMenuActions}
 				/>
 			) : (
 				<div className="flex min-h-0 min-w-0 flex-1 items-center justify-center text-sm text-muted-foreground">

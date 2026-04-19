@@ -2,10 +2,30 @@ import { EventEmitter } from "node:events";
 import { app, dialog } from "electron";
 import { autoUpdater } from "electron-updater";
 import { env } from "main/env.main";
-import { prepareQuit } from "main/index";
+import { setSkipQuitConfirmation } from "main/index";
 import { prerelease } from "semver";
 import { AUTO_UPDATE_STATUS, type AutoUpdateStatus } from "shared/auto-update";
 import { PLATFORM } from "shared/constants";
+
+// electron-updater's internal cache only self-invalidates when the remote
+// sha512 differs from cached metadata, so a corrupt cached download (e.g.
+// failed Squirrel install) gets retried indefinitely until the user
+// manually reinstalls. Reach into the protected helper to clear it.
+interface AppUpdaterInternals {
+	downloadedUpdateHelper: { clear(): Promise<void> } | null;
+}
+
+async function clearCachedUpdate(reason: string): Promise<void> {
+	const helper = (autoUpdater as unknown as AppUpdaterInternals)
+		.downloadedUpdateHelper;
+	if (!helper) return;
+	try {
+		await helper.clear();
+		console.info(`[auto-updater] Cleared cached update (${reason})`);
+	} catch (error) {
+		console.error("[auto-updater] Failed to clear cached update:", error);
+	}
+}
 
 const UPDATE_CHECK_INTERVAL_MS = 1000 * 60 * 60 * 4; // 4 hours
 
@@ -62,6 +82,7 @@ function isNetworkError(error: Error | string): boolean {
 let currentStatus: AutoUpdateStatus = AUTO_UPDATE_STATUS.IDLE;
 let currentVersion: string | undefined;
 let isDismissed = false;
+let isInstalling = false;
 
 function emitStatus(
 	status: AutoUpdateStatus,
@@ -96,8 +117,25 @@ export function installUpdate(): void {
 		emitStatus(AUTO_UPDATE_STATUS.IDLE);
 		return;
 	}
-	// quitAndInstall internally calls app.quit() — set mode beforehand
-	prepareQuit("release");
+	// MacUpdater.quitAndInstall() registers a fresh native-updater
+	// `update-downloaded` listener each time it runs before Squirrel.Mac has
+	// finished staging. Without this guard, repeat clicks fan out into
+	// parallel quitAndInstall calls once Squirrel fires — racing to swap
+	// the binary and leaving the app on the old version.
+	if (isInstalling) {
+		console.info(
+			"[auto-updater] Install already in progress, ignoring duplicate request",
+		);
+		return;
+	}
+	if (currentStatus !== AUTO_UPDATE_STATUS.READY) {
+		console.warn(
+			`[auto-updater] Install ignored: update not ready (status=${currentStatus})`,
+		);
+		return;
+	}
+	isInstalling = true;
+	setSkipQuitConfirmation();
 	autoUpdater.quitAndInstall(false, true);
 }
 
@@ -243,6 +281,8 @@ export function setupAutoUpdater(): void {
 	);
 
 	autoUpdater.on("error", (error) => {
+		// Allow retry if Squirrel surfaces an error instead of actually quitting.
+		isInstalling = false;
 		if (isNetworkError(error)) {
 			console.info("[auto-updater] Network unavailable, will retry later");
 			emitStatus(AUTO_UPDATE_STATUS.IDLE);
@@ -252,6 +292,7 @@ export function setupAutoUpdater(): void {
 			`[auto-updater] Error during update (currentVersion=${app.getVersion()}):`,
 			error?.message || error,
 		);
+		void clearCachedUpdate(`error: ${error?.message ?? "unknown"}`);
 		emitStatus(AUTO_UPDATE_STATUS.ERROR, undefined, error.message);
 	});
 
@@ -287,15 +328,6 @@ export function setupAutoUpdater(): void {
 			`[auto-updater] Update downloaded: ${app.getVersion()} → ${info.version}. Ready to install.`,
 		);
 		emitStatus(AUTO_UPDATE_STATUS.READY, info.version);
-
-		// After an app update is ready, check if running host-service instances
-		// will need a restart once the new version is installed.
-		try {
-			const { getHostServiceManager } = require("../host-service-manager");
-			getHostServiceManager().checkAllCompatibility();
-		} catch {
-			// Host service manager may not be initialized yet
-		}
 	});
 
 	const interval = setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL_MS);

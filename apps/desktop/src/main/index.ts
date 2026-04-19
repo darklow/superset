@@ -13,9 +13,11 @@ import {
 import { makeAppSetup } from "lib/electron-app/factories/app/setup";
 import {
 	handleAuthCallback,
+	loadToken,
 	parseAuthDeepLink,
 } from "lib/trpc/routers/auth/utils/auth-functions";
 import { applyShellEnvToProcess } from "lib/trpc/routers/workspaces/utils/shell-env";
+import { env as mainEnv } from "main/env.main";
 import {
 	DEFAULT_CONFIRM_ON_QUIT,
 	PLATFORM,
@@ -28,8 +30,9 @@ import { setupAutoUpdater } from "./lib/auto-updater";
 import { resolveDevWorkspaceName } from "./lib/dev-workspace-name";
 import { setWorkspaceDockIcon } from "./lib/dock-icon";
 import { loadWebviewBrowserExtension } from "./lib/extensions";
-import { getHostServiceManager } from "./lib/host-service-manager";
+import { getHostServiceCoordinator } from "./lib/host-service-coordinator";
 import { localDb } from "./lib/local-db";
+import { requestLocalNetworkAccess } from "./lib/local-network-permission";
 import { ensureProjectIconsDir, getProjectIconPath } from "./lib/project-icons";
 import { initSentry } from "./lib/sentry";
 import {
@@ -150,26 +153,19 @@ app.on("open-url", async (event, url) => {
 	}
 });
 
-export type QuitMode = "release" | "stop";
-let pendingQuitMode: QuitMode | null = null;
 let isQuitting = false;
+let skipQuitConfirmation = false;
 
-/** Request the app to quit.
- *  - "release": keep services running (re-adoptable on next launch)
- *  - "stop": terminate all services before exit */
-export function requestQuit(mode: QuitMode): void {
-	pendingQuitMode = mode;
+export function setSkipQuitConfirmation(): void {
+	skipQuitConfirmation = true;
+}
+
+export function quitApp(): void {
+	setSkipQuitConfirmation();
 	app.quit();
 }
 
-/** Set quit mode without triggering quit.
- *  Use when another API (e.g. autoUpdater.quitAndInstall) triggers quit internally. */
-export function prepareQuit(mode: QuitMode): void {
-	pendingQuitMode = mode;
-}
-
-/** Exit the process immediately, bypassing before-quit.
- *  Services are left running for adoption on next launch. */
+/** Bypasses before-quit — services are left running for re-adoption on next launch. */
 export function exitImmediately(): void {
 	app.exit(0);
 }
@@ -186,27 +182,8 @@ function getConfirmOnQuitSetting(): boolean {
 app.on("before-quit", async (event) => {
 	if (isQuitting) return;
 
-	// Consume the quit mode so it doesn't persist across aborted quits
-	const quitMode = pendingQuitMode;
-	pendingQuitMode = null;
-
-	const manager = getHostServiceManager();
-
-	// macOS: close windows & keep tray alive when services should stay running
-	if (
-		PLATFORM.IS_MAC &&
-		(quitMode === null || quitMode === "release") &&
-		manager.hasActiveInstances()
-	) {
-		event.preventDefault();
-		for (const win of BrowserWindow.getAllWindows()) {
-			win.destroy();
-		}
-		return;
-	}
-
 	const isDev = process.env.NODE_ENV === "development";
-	if (quitMode === null && !isDev && getConfirmOnQuitSetting()) {
+	if (!skipQuitConfirmation && !isDev && getConfirmOnQuitSetting()) {
 		event.preventDefault();
 
 		try {
@@ -228,12 +205,12 @@ app.on("before-quit", async (event) => {
 	}
 
 	isQuitting = true;
-	if (quitMode === "stop") {
-		manager.stopAll();
-	} else {
-		manager.releaseAll();
+	try {
+		getHostServiceCoordinator().releaseAll();
+		disposeTray();
+	} catch (error) {
+		console.error("[main] Cleanup during quit failed:", error);
 	}
-	disposeTray();
 	app.exit(0);
 });
 
@@ -317,6 +294,7 @@ if (!gotTheLock) {
 		await app.whenReady();
 		registerWithMacOSNotificationCenter();
 		requestAppleEventsAccess();
+		requestLocalNetworkAccess();
 
 		// Must register on both default session and the app's custom partition
 		const iconProtocolHandler = (request: Request) => {
@@ -382,7 +360,15 @@ if (!gotTheLock) {
 
 		// Discover and adopt host-services that survived a previous quit
 		// before the tray initializes, so it shows accurate status immediately.
-		await getHostServiceManager().discoverAndAdoptAll();
+		await getHostServiceCoordinator().discoverAll();
+
+		if (IS_DEV) {
+			getHostServiceCoordinator().enableDevReload(async () => {
+				const { token } = await loadToken();
+				if (!token) return null;
+				return { authToken: token, cloudApiUrl: mainEnv.NEXT_PUBLIC_API_URL };
+			});
+		}
 
 		await makeAppSetup(() => MainWindow());
 		setupAutoUpdater();

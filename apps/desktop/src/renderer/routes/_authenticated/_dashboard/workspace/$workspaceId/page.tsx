@@ -33,10 +33,10 @@ import { useTabsStore } from "renderer/stores/tabs/store";
 import type { Tab } from "renderer/stores/tabs/types";
 import { useTabsWithPresets } from "renderer/stores/tabs/useTabsWithPresets";
 import {
+	type FocusDirection,
 	findPanePath,
 	getFirstPaneId,
-	getNextPaneId,
-	getPreviousPaneId,
+	getSpatialNeighborMosaicPaneId,
 	resolveActiveTabIdForWorkspace,
 } from "renderer/stores/tabs/utils";
 import {
@@ -276,22 +276,6 @@ function WorkspacePage() {
 	useHotkey("JUMP_TO_TAB_8", () => switchToTab(7));
 	useHotkey("JUMP_TO_TAB_9", () => switchToTab(8));
 
-	useHotkey("PREV_PANE", () => {
-		if (!activeTabId || !activeTab?.layout || !focusedPaneId) return;
-		const prevPaneId = getPreviousPaneId(activeTab.layout, focusedPaneId);
-		if (prevPaneId) {
-			setFocusedPane(activeTabId, prevPaneId);
-		}
-	});
-
-	useHotkey("NEXT_PANE", () => {
-		if (!activeTabId || !activeTab?.layout || !focusedPaneId) return;
-		const nextPaneId = getNextPaneId(activeTab.layout, focusedPaneId);
-		if (nextPaneId) {
-			setFocusedPane(activeTabId, nextPaneId);
-		}
-	});
-
 	// Open in last used app shortcut
 	const projectId = workspace?.projectId;
 	const { data: defaultApp } = electronTrpc.projects.getDefaultApp.useQuery(
@@ -317,7 +301,6 @@ function WorkspacePage() {
 			});
 		}
 	}, [workspace?.worktreePath, resolvedDefaultApp, mutateOpenInApp, projectId]);
-	useHotkey("OPEN_IN_APP", handleOpenInApp);
 
 	// Copy path shortcut
 	const { copyToClipboard } = useCopyToClipboard();
@@ -347,8 +330,8 @@ function WorkspacePage() {
 	// Toggle changes sidebar (⌘L)
 	useHotkey("TOGGLE_SIDEBAR", () => toggleSidebar());
 
-	// Toggle expand/collapse sidebar (⌘⇧L)
-	useHotkey("TOGGLE_EXPAND_SIDEBAR", () => {
+	// Open diff viewer (⌘⇧L)
+	useHotkey("OPEN_DIFF_VIEWER", () => {
 		if (!isSidebarOpen) {
 			setSidebarOpen(true);
 			setSidebarMode(SidebarMode.Changes);
@@ -427,7 +410,23 @@ function WorkspacePage() {
 		}
 	});
 
-	// Navigate to previous workspace (⌘↑)
+	const moveFocusDirectional = useCallback(
+		(dir: FocusDirection) => {
+			if (!activeTabId || !activeTab?.layout || !focusedPaneId) return;
+			const neighbor = getSpatialNeighborMosaicPaneId(
+				activeTab.layout,
+				focusedPaneId,
+				dir,
+			);
+			if (neighbor) setFocusedPane(activeTabId, neighbor);
+		},
+		[activeTabId, activeTab?.layout, focusedPaneId, setFocusedPane],
+	);
+	useHotkey("FOCUS_PANE_LEFT", () => moveFocusDirectional("left"));
+	useHotkey("FOCUS_PANE_RIGHT", () => moveFocusDirectional("right"));
+	useHotkey("FOCUS_PANE_UP", () => moveFocusDirectional("up"));
+	useHotkey("FOCUS_PANE_DOWN", () => moveFocusDirectional("down"));
+
 	const getPreviousWorkspace =
 		electronTrpc.workspaces.getPreviousWorkspace.useQuery(
 			{ id: workspaceId },
@@ -440,7 +439,6 @@ function WorkspacePage() {
 		}
 	});
 
-	// Navigate to next workspace (⌘↓)
 	const getNextWorkspace = electronTrpc.workspaces.getNextWorkspace.useQuery(
 		{ id: workspaceId },
 		{ enabled: !!workspaceId },

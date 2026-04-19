@@ -109,6 +109,7 @@ export const HOTKEYS_REGISTRY = {
 		},
 		label: "Previous Workspace",
 		category: "Workspace",
+		description: "Navigate to the previous workspace in the sidebar",
 	},
 	NEXT_WORKSPACE: {
 		key: {
@@ -118,6 +119,7 @@ export const HOTKEYS_REGISTRY = {
 		},
 		label: "Next Workspace",
 		category: "Workspace",
+		description: "Navigate to the next workspace in the sidebar",
 	},
 	CLOSE_WORKSPACE: {
 		key: {
@@ -184,14 +186,16 @@ export const HOTKEYS_REGISTRY = {
 		label: "Toggle Changes Tab",
 		category: "Layout",
 	},
-	TOGGLE_EXPAND_SIDEBAR: {
+	OPEN_DIFF_VIEWER: {
 		key: {
 			mac: "meta+shift+l",
 			windows: "ctrl+shift+alt+l",
 			linux: "ctrl+shift+alt+l",
 		},
-		label: "Toggle Expand Sidebar",
+		label: "Open Diff Viewer",
 		category: "Layout",
+		description:
+			"Open the diff viewer in a new tab, or focus the existing diff viewer",
 	},
 	TOGGLE_WORKSPACE_SIDEBAR: {
 		key: { mac: "meta+b", windows: "ctrl+shift+b", linux: "ctrl+shift+b" },
@@ -327,30 +331,12 @@ export const HOTKEYS_REGISTRY = {
 	SCROLL_TO_BOTTOM: {
 		key: {
 			mac: "meta+shift+down",
-			windows: "ctrl+shift+alt+down",
-			linux: "ctrl+shift+alt+down",
+			windows: "ctrl+end",
+			linux: "ctrl+end",
 		},
 		label: "Scroll to Bottom",
 		category: "Terminal",
 		description: "Scroll the active terminal to the bottom",
-	},
-	PREV_TAB: {
-		key: {
-			mac: "meta+alt+left",
-			windows: "ctrl+shift+alt+left",
-			linux: "ctrl+shift+alt+left",
-		},
-		label: "Previous Tab",
-		category: "Terminal",
-	},
-	NEXT_TAB: {
-		key: {
-			mac: "meta+alt+right",
-			windows: "ctrl+shift+alt+right",
-			linux: "ctrl+shift+alt+right",
-		},
-		label: "Next Tab",
-		category: "Terminal",
 	},
 	PREV_TAB_ALT: {
 		key: {
@@ -366,25 +352,49 @@ export const HOTKEYS_REGISTRY = {
 		label: "Next Tab (Alt)",
 		category: "Terminal",
 	},
-	PREV_PANE: {
+	PREV_TAB: {
 		key: {
-			mac: "meta+shift+left",
+			mac: "meta+alt+left",
 			windows: "ctrl+shift+alt+left",
 			linux: "ctrl+shift+alt+left",
 		},
-		label: "Previous Pane",
+		label: "Previous Tab",
 		category: "Terminal",
-		description: "Focus the previous pane in the current tab",
+		description: "Focus the previous tab in the active workspace",
 	},
-	NEXT_PANE: {
+	NEXT_TAB: {
 		key: {
-			mac: "meta+shift+right",
+			mac: "meta+alt+right",
 			windows: "ctrl+shift+alt+right",
 			linux: "ctrl+shift+alt+right",
 		},
-		label: "Next Pane",
+		label: "Next Tab",
 		category: "Terminal",
-		description: "Focus the next pane in the current tab",
+		description: "Focus the next tab in the active workspace",
+	},
+	FOCUS_PANE_LEFT: {
+		key: { mac: null, windows: null, linux: null },
+		label: "Focus Pane Left",
+		category: "Terminal",
+		description: "Focus the pane to the left of the active pane",
+	},
+	FOCUS_PANE_RIGHT: {
+		key: { mac: null, windows: null, linux: null },
+		label: "Focus Pane Right",
+		category: "Terminal",
+		description: "Focus the pane to the right of the active pane",
+	},
+	FOCUS_PANE_UP: {
+		key: { mac: null, windows: null, linux: null },
+		label: "Focus Pane Up",
+		category: "Terminal",
+		description: "Focus the pane above the active pane",
+	},
+	FOCUS_PANE_DOWN: {
+		key: { mac: null, windows: null, linux: null },
+		label: "Focus Pane Down",
+		category: "Terminal",
+		description: "Focus the pane below the active pane",
 	},
 	JUMP_TO_TAB_1: {
 		key: {
@@ -556,7 +566,7 @@ export const HOTKEYS_REGISTRY = {
 	},
 	SHOW_HOTKEYS: {
 		key: {
-			mac: "meta+slash",
+			mac: "meta+shift+slash",
 			windows: "ctrl+shift+slash",
 			linux: "ctrl+shift+slash",
 		},

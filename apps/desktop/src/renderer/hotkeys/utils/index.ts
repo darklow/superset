@@ -1,1 +1,5 @@
-export { isAppHotkeyEvent, isTerminalReservedEvent } from "./utils";
+export {
+	matchesChord,
+	resolveHotkeyFromEvent,
+} from "./resolveHotkeyFromEvent";
+export { isTerminalReservedEvent } from "./utils";
