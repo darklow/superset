@@ -179,15 +179,24 @@ function getConfirmOnQuitSetting(): boolean {
 	}
 }
 
-app.on("before-quit", async (event) => {
+app.on("before-quit", (event) => {
 	if (isQuitting) return;
 
 	const isDev = process.env.NODE_ENV === "development";
 	if (!skipQuitConfirmation && !isDev && getConfirmOnQuitSetting()) {
 		event.preventDefault();
 
+		const parentWindow = BrowserWindow.getAllWindows().find(
+			(w) => !w.isDestroyed(),
+		);
+		if (parentWindow) {
+			if (!parentWindow.isVisible()) parentWindow.show();
+			parentWindow.focus();
+		}
+
+		let response = 0;
 		try {
-			const { response } = await dialog.showMessageBox({
+			response = dialog.showMessageBoxSync(parentWindow ?? (null as never), {
 				type: "question",
 				buttons: ["Quit", "Cancel"],
 				defaultId: 0,
@@ -195,12 +204,12 @@ app.on("before-quit", async (event) => {
 				title: "Quit Superset",
 				message: "Are you sure you want to quit?",
 			});
-
-			if (response === 1) {
-				return;
-			}
 		} catch (error) {
 			console.error("[main] Quit confirmation dialog failed:", error);
+		}
+
+		if (response === 1) {
+			return;
 		}
 	}
 
