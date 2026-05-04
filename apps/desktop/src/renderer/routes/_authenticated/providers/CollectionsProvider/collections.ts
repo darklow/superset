@@ -1,6 +1,8 @@
 import { snakeCamelMapper } from "@electric-sql/client";
 import type {
 	SelectAgentCommand,
+	SelectAutomation,
+	SelectAutomationRun,
 	SelectChatSession,
 	SelectGithubPullRequest,
 	SelectGithubRepository,
@@ -9,7 +11,6 @@ import type {
 	SelectMember,
 	SelectOrganization,
 	SelectProject,
-	SelectSessionHost,
 	SelectSubscription,
 	SelectTask,
 	SelectTaskStatus,
@@ -23,11 +24,16 @@ import type {
 } from "@superset/db/schema";
 import type { AppRouter } from "@superset/trpc";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
+import {
+	createElectronSQLitePersistence,
+	persistedCollectionOptions,
+} from "@tanstack/electron-db-sqlite-persistence";
 import type {
 	Collection,
 	LocalStorageCollectionUtils,
 } from "@tanstack/react-db";
 import {
+	BasicIndex,
 	createCollection,
 	localStorageCollectionOptions,
 } from "@tanstack/react-db";
@@ -41,10 +47,10 @@ import {
 	type DashboardSidebarSectionRow,
 	dashboardSidebarProjectSchema,
 	dashboardSidebarSectionSchema,
-	type PendingWorkspaceRow,
-	pendingWorkspaceSchema,
 	type V2TerminalPresetRow,
+	type V2UserPreferencesRow,
 	v2TerminalPresetSchema,
+	v2UserPreferencesSchema,
 	type WorkspaceLocalStateRow,
 	workspaceLocalStateSchema,
 } from "./dashboardSidebarLocal";
@@ -52,6 +58,35 @@ import {
 const columnMapper = snakeCamelMapper();
 
 const electricUrl = `${env.NEXT_PUBLIC_ELECTRIC_URL}/v1/shape`;
+
+const persistence = createElectronSQLitePersistence({
+	invoke: (channel, request) => window.ipcRenderer.invoke(channel, request),
+});
+
+const indexDefaults = {
+	autoIndex: "eager",
+	defaultIndexType: BasicIndex,
+} as const;
+
+const createIndexedCollection = ((
+	config: Parameters<typeof createCollection>[0],
+) =>
+	createCollection({ ...config, ...indexDefaults })) as typeof createCollection;
+
+type ElectricSyncConfig = ReturnType<typeof electricCollectionOptions>;
+const createPersistedElectricCollection = ((config: ElectricSyncConfig) => {
+	const persisted = persistedCollectionOptions({
+		...config,
+		persistence,
+		schemaVersion: 1,
+		// biome-ignore lint/suspicious/noExplicitAny: forces sync-wrapped overload
+	} as any);
+	return createCollection({
+		...persisted,
+		...indexDefaults,
+		// biome-ignore lint/suspicious/noExplicitAny: persisted utils widen generics
+	} as any);
+}) as unknown as typeof createCollection;
 
 const apiKeyDisplaySchema = z.object({
 	id: z.string(),
@@ -86,9 +121,10 @@ export interface OrgCollections {
 	subscriptions: Collection<SelectSubscription>;
 	apiKeys: Collection<ApiKeyDisplay>;
 	chatSessions: Collection<SelectChatSession>;
-	sessionHosts: Collection<SelectSessionHost>;
 	githubRepositories: Collection<SelectGithubRepository>;
 	githubPullRequests: Collection<SelectGithubPullRequest>;
+	automations: Collection<SelectAutomation>;
+	automationRuns: Collection<SelectAutomationRun>;
 	v2SidebarProjects: Collection<
 		DashboardSidebarProjectRow,
 		string,
@@ -117,12 +153,12 @@ export interface OrgCollections {
 		typeof v2TerminalPresetSchema,
 		z.input<typeof v2TerminalPresetSchema>
 	>;
-	pendingWorkspaces: Collection<
-		PendingWorkspaceRow,
+	v2UserPreferences: Collection<
+		V2UserPreferencesRow,
 		string,
 		LocalStorageCollectionUtils,
-		typeof pendingWorkspaceSchema,
-		z.input<typeof pendingWorkspaceSchema>
+		typeof v2UserPreferencesSchema,
+		z.input<typeof v2UserPreferencesSchema>
 	>;
 }
 
@@ -154,7 +190,7 @@ const electricHeaders = {
 	},
 };
 
-const organizationsCollection = createCollection(
+const organizationsCollection = createPersistedElectricCollection(
 	electricCollectionOptions<SelectOrganization>({
 		id: "organizations",
 		shapeOptions: {
@@ -168,7 +204,7 @@ const organizationsCollection = createCollection(
 );
 
 function createOrgCollections(organizationId: string): OrgCollections {
-	const tasks = createCollection(
+	const tasks = createPersistedElectricCollection(
 		electricCollectionOptions<SelectTask>({
 			id: `tasks-${organizationId}`,
 			shapeOptions: {
@@ -181,11 +217,6 @@ function createOrgCollections(organizationId: string): OrgCollections {
 				columnMapper,
 			},
 			getKey: (item) => item.id,
-			onInsert: async ({ transaction }) => {
-				const item = transaction.mutations[0].modified;
-				const result = await apiClient.task.create.mutate(item);
-				return { txid: result.txid };
-			},
 			onUpdate: async ({ transaction }) => {
 				const { original, changes } = transaction.mutations[0];
 				const result = await apiClient.task.update.mutate({
@@ -202,7 +233,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const taskStatuses = createCollection(
+	const taskStatuses = createPersistedElectricCollection(
 		electricCollectionOptions<SelectTaskStatus>({
 			id: `task_statuses-${organizationId}`,
 			shapeOptions: {
@@ -218,7 +249,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const projects = createCollection(
+	const projects = createPersistedElectricCollection(
 		electricCollectionOptions<SelectProject>({
 			id: `projects-${organizationId}`,
 			shapeOptions: {
@@ -234,7 +265,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const v2Projects = createCollection(
+	const v2Projects = createPersistedElectricCollection(
 		electricCollectionOptions<SelectV2Project>({
 			id: `v2_projects-${organizationId}`,
 			shapeOptions: {
@@ -247,10 +278,26 @@ function createOrgCollections(organizationId: string): OrgCollections {
 				columnMapper,
 			},
 			getKey: (item) => item.id,
+			onUpdate: async ({ transaction }) => {
+				const { original, changes } = transaction.mutations[0];
+				const githubRepositoryId =
+					changes.githubRepositoryId === null &&
+					changes.repoCloneUrl !== undefined
+						? undefined
+						: changes.githubRepositoryId;
+				const result = await apiClient.v2Project.update.mutate({
+					id: original.id,
+					name: changes.name,
+					slug: changes.slug,
+					repoCloneUrl: changes.repoCloneUrl,
+					githubRepositoryId,
+				});
+				return { txid: result.txid };
+			},
 		}),
 	);
 
-	const v2Hosts = createCollection(
+	const v2Hosts = createPersistedElectricCollection(
 		electricCollectionOptions<SelectV2Host>({
 			id: `v2_hosts-${organizationId}`,
 			shapeOptions: {
@@ -262,11 +309,13 @@ function createOrgCollections(organizationId: string): OrgCollections {
 				headers: electricHeaders,
 				columnMapper,
 			},
-			getKey: (item) => item.id,
+			// Composite PK on (organization_id, machine_id); within an
+			// org-scoped collection, machineId alone is unique.
+			getKey: (item) => item.machineId,
 		}),
 	);
 
-	const v2Clients = createCollection(
+	const v2Clients = createPersistedElectricCollection(
 		electricCollectionOptions<SelectV2Client>({
 			id: `v2_clients-${organizationId}`,
 			shapeOptions: {
@@ -278,11 +327,13 @@ function createOrgCollections(organizationId: string): OrgCollections {
 				headers: electricHeaders,
 				columnMapper,
 			},
-			getKey: (item) => item.id,
+			// Composite PK on (organization_id, user_id, machine_id); within
+			// an org-scoped collection, (user_id, machine_id) is unique.
+			getKey: (item) => `${item.userId}:${item.machineId}`,
 		}),
 	);
 
-	const v2UsersHosts = createCollection(
+	const v2UsersHosts = createPersistedElectricCollection(
 		electricCollectionOptions<SelectV2UsersHosts>({
 			id: `v2_users_hosts-${organizationId}`,
 			shapeOptions: {
@@ -294,11 +345,40 @@ function createOrgCollections(organizationId: string): OrgCollections {
 				headers: electricHeaders,
 				columnMapper,
 			},
-			getKey: (item) => item.id,
+			getKey: (item) => `${item.userId}:${item.hostId}`,
+			onInsert: async ({ transaction }) => {
+				const item = transaction.mutations[0].modified;
+				const result = await apiClient.v2Host.addMember.mutate({
+					hostId: item.hostId,
+					userId: item.userId,
+					role: item.role,
+				});
+				return { txid: result.txid };
+			},
+			onUpdate: async ({ transaction }) => {
+				const { original, changes } = transaction.mutations[0];
+				if (changes.role === undefined) {
+					throw new Error("Only role updates are supported on v2_users_hosts");
+				}
+				const result = await apiClient.v2Host.setMemberRole.mutate({
+					hostId: original.hostId,
+					userId: original.userId,
+					role: changes.role,
+				});
+				return { txid: result.txid };
+			},
+			onDelete: async ({ transaction }) => {
+				const item = transaction.mutations[0].original;
+				const result = await apiClient.v2Host.removeMember.mutate({
+					hostId: item.hostId,
+					userId: item.userId,
+				});
+				return { txid: result.txid };
+			},
 		}),
 	);
 
-	const v2Workspaces = createCollection(
+	const v2Workspaces = createPersistedElectricCollection(
 		electricCollectionOptions<SelectV2Workspace>({
 			id: `v2_workspaces-${organizationId}`,
 			shapeOptions: {
@@ -311,10 +391,21 @@ function createOrgCollections(organizationId: string): OrgCollections {
 				columnMapper,
 			},
 			getKey: (item) => item.id,
+			onUpdate: async ({ transaction }) => {
+				const { original, changes } = transaction.mutations[0];
+				const { branch, hostId, name } = changes;
+				const result = await apiClient.v2Workspace.update.mutate({
+					id: original.id,
+					branch,
+					hostId,
+					name,
+				});
+				return { txid: result.txid };
+			},
 		}),
 	);
 
-	const workspaces = createCollection(
+	const workspaces = createPersistedElectricCollection(
 		electricCollectionOptions<SelectWorkspace>({
 			id: `workspaces-${organizationId}`,
 			shapeOptions: {
@@ -330,7 +421,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const members = createCollection(
+	const members = createPersistedElectricCollection(
 		electricCollectionOptions<SelectMember>({
 			id: `members-${organizationId}`,
 			shapeOptions: {
@@ -346,7 +437,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const users = createCollection(
+	const users = createPersistedElectricCollection(
 		electricCollectionOptions<SelectUser>({
 			id: `users-${organizationId}`,
 			shapeOptions: {
@@ -362,7 +453,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const invitations = createCollection(
+	const invitations = createPersistedElectricCollection(
 		electricCollectionOptions<SelectInvitation>({
 			id: `invitations-${organizationId}`,
 			shapeOptions: {
@@ -378,7 +469,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const agentCommands = createCollection(
+	const agentCommands = createPersistedElectricCollection(
 		electricCollectionOptions<SelectAgentCommand>({
 			id: `agent_commands-${organizationId}`,
 			shapeOptions: {
@@ -402,7 +493,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const integrationConnections = createCollection(
+	const integrationConnections = createPersistedElectricCollection(
 		electricCollectionOptions<IntegrationConnectionDisplay>({
 			id: `integration_connections-${organizationId}`,
 			shapeOptions: {
@@ -418,7 +509,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const subscriptions = createCollection(
+	const subscriptions = createPersistedElectricCollection(
 		electricCollectionOptions<SelectSubscription>({
 			id: `subscriptions-${organizationId}`,
 			shapeOptions: {
@@ -434,7 +525,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const apiKeys = createCollection(
+	const apiKeys = createPersistedElectricCollection(
 		electricCollectionOptions<ApiKeyDisplay>({
 			id: `apikeys-${organizationId}`,
 			shapeOptions: {
@@ -450,7 +541,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const chatSessions = createCollection(
+	const chatSessions = createPersistedElectricCollection(
 		electricCollectionOptions<SelectChatSession>({
 			id: `chat_sessions-${organizationId}`,
 			shapeOptions: {
@@ -463,26 +554,20 @@ function createOrgCollections(organizationId: string): OrgCollections {
 				columnMapper,
 			},
 			getKey: (item) => item.id,
-		}),
-	);
-
-	const sessionHosts = createCollection(
-		electricCollectionOptions<SelectSessionHost>({
-			id: `session_hosts-${organizationId}`,
-			shapeOptions: {
-				url: electricUrl,
-				params: {
-					table: "session_hosts",
-					organizationId,
-				},
-				headers: electricHeaders,
-				columnMapper,
+			onDelete: async ({ transaction }) => {
+				const item = transaction.mutations[0].original;
+				const result = await apiClient.chat.deleteSession.mutate({
+					sessionId: item.id,
+				});
+				if (!result.deleted) {
+					throw new Error("Chat session was not deleted");
+				}
+				return { txid: result.txid };
 			},
-			getKey: (item) => item.id,
 		}),
 	);
 
-	const githubRepositories = createCollection(
+	const githubRepositories = createPersistedElectricCollection(
 		electricCollectionOptions<SelectGithubRepository>({
 			id: `github_repositories-${organizationId}`,
 			shapeOptions: {
@@ -498,7 +583,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const githubPullRequests = createCollection(
+	const githubPullRequests = createPersistedElectricCollection(
 		electricCollectionOptions<SelectGithubPullRequest>({
 			id: `github_pull_requests-${organizationId}`,
 			shapeOptions: {
@@ -514,7 +599,39 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const v2SidebarProjects = createCollection(
+	const automations = createPersistedElectricCollection(
+		electricCollectionOptions<SelectAutomation>({
+			id: `automations-${organizationId}`,
+			shapeOptions: {
+				url: electricUrl,
+				params: {
+					table: "automations",
+					organizationId,
+				},
+				headers: electricHeaders,
+				columnMapper,
+			},
+			getKey: (item) => item.id,
+		}),
+	);
+
+	const automationRuns = createPersistedElectricCollection(
+		electricCollectionOptions<SelectAutomationRun>({
+			id: `automation_runs-${organizationId}`,
+			shapeOptions: {
+				url: electricUrl,
+				params: {
+					table: "automation_runs",
+					organizationId,
+				},
+				headers: electricHeaders,
+				columnMapper,
+			},
+			getKey: (item) => item.id,
+		}),
+	);
+
+	const v2SidebarProjects = createIndexedCollection(
 		localStorageCollectionOptions({
 			id: `v2_sidebar_projects-${organizationId}`,
 			storageKey: `v2-sidebar-projects-${organizationId}`,
@@ -523,7 +640,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const v2WorkspaceLocalState = createCollection(
+	const v2WorkspaceLocalState = createIndexedCollection(
 		localStorageCollectionOptions({
 			id: `v2_workspace_local_state-${organizationId}`,
 			storageKey: `v2-workspace-local-state-${organizationId}`,
@@ -532,7 +649,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const v2SidebarSections = createCollection(
+	const v2SidebarSections = createIndexedCollection(
 		localStorageCollectionOptions({
 			id: `v2_sidebar_sections-${organizationId}`,
 			storageKey: `v2-sidebar-sections-${organizationId}`,
@@ -541,7 +658,7 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const v2TerminalPresets = createCollection(
+	const v2TerminalPresets = createIndexedCollection(
 		localStorageCollectionOptions({
 			id: `v2_terminal_presets-${organizationId}`,
 			storageKey: `v2-terminal-presets-${organizationId}`,
@@ -550,12 +667,15 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		}),
 	);
 
-	const pendingWorkspaces = createCollection(
+	const v2UserPreferences = createCollection(
 		localStorageCollectionOptions({
-			id: `pending_workspaces-${organizationId}`,
-			storageKey: `pending-workspaces-${organizationId}`,
-			schema: pendingWorkspaceSchema,
-			getKey: (item) => item.id,
+			id: `v2_user_preferences-${organizationId}`,
+			storageKey: `v2-user-preferences-${organizationId}`,
+			schema: v2UserPreferencesSchema,
+			// Cast widens the inferred literal "preferences" key to string so
+			// the collection slots into the shared OrgCollections.{...<TKey=string>}
+			// shape alongside the other v2 collections.
+			getKey: (item) => item.id as string,
 		}),
 	);
 
@@ -577,14 +697,15 @@ function createOrgCollections(organizationId: string): OrgCollections {
 		subscriptions,
 		apiKeys,
 		chatSessions,
-		sessionHosts,
 		githubRepositories,
 		githubPullRequests,
+		automations,
+		automationRuns,
 		v2SidebarProjects,
 		v2WorkspaceLocalState,
 		v2SidebarSections,
 		v2TerminalPresets,
-		pendingWorkspaces,
+		v2UserPreferences,
 	};
 }
 

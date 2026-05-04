@@ -11,6 +11,7 @@ import {
 	markTerminalSessionReady,
 	rejectTerminalSessionReady,
 } from "renderer/lib/terminal/session-readiness";
+import { installTerminalKeyEventHandler } from "renderer/lib/terminal/terminal-key-event-handler";
 import { electronTrpcClient } from "renderer/lib/trpc-client";
 import { useTabsStore } from "renderer/stores/tabs/store";
 import { killTerminalForPane } from "renderer/stores/tabs/utils/terminal-cleanup";
@@ -23,8 +24,6 @@ import {
 	setupCopyHandler,
 	setupCopyOnSelect,
 	setupFocusListener,
-	setupKeyboardHandler,
-	setupPasteHandler,
 } from "../helpers";
 import { isPaneDestroyed } from "../pane-guards";
 import { coldRestoreState, pendingDetaches } from "../state";
@@ -130,7 +129,6 @@ export interface UseTerminalLifecycleOptions {
 	flushPendingEvents: () => void;
 	resetModes: () => void;
 	isAlternateScreenRef: MutableRefObject<boolean>;
-	isBracketedPasteRef: MutableRefObject<boolean>;
 	setPaneNameRef: MutableRefObject<(paneId: string, name: string) => void>;
 	renameUnnamedWorkspaceRef: MutableRefObject<(title: string) => void>;
 	handleTerminalFocusRef: MutableRefObject<() => void>;
@@ -192,7 +190,6 @@ export function useTerminalLifecycle({
 	flushPendingEvents,
 	resetModes,
 	isAlternateScreenRef,
-	isBracketedPasteRef,
 	setPaneNameRef,
 	renameUnnamedWorkspaceRef,
 	handleTerminalFocusRef,
@@ -760,11 +757,7 @@ export function useTerminalLifecycle({
 			writeRef.current({ paneId, data });
 		};
 
-		const cleanupKeyboard = setupKeyboardHandler(xterm, {
-			onShiftEnter: () => handleWrite("\x1b\r"),
-			onClear: handleClear,
-			onWrite: handleWrite,
-		});
+		const cleanupKeyboard = installTerminalKeyEventHandler(xterm);
 		const cleanupClickToMove = setupClickToMoveCursor(xterm, {
 			onWrite: handleWrite,
 		});
@@ -791,13 +784,6 @@ export function useTerminalLifecycle({
 		const cleanupFocus = setupFocusListener(xterm, () =>
 			handleTerminalFocusRef.current(),
 		);
-		const cleanupPaste = setupPasteHandler(xterm, {
-			onPaste: (text) => {
-				commandBufferRef.current += text;
-			},
-			onWrite: handleWrite,
-			isBracketedPasteEnabled: () => isBracketedPasteRef.current,
-		});
 		const cleanupCopy = setupCopyHandler(xterm);
 
 		const isPaneDestroyedInStore = () =>
@@ -829,7 +815,6 @@ export function useTerminalLifecycle({
 			cleanupKeyboard();
 			cleanupClickToMove();
 			cleanupFocus?.();
-			cleanupPaste();
 			cleanupCopy();
 			unregisterClearCallbackRef.current(paneId);
 			unregisterScrollToBottomCallbackRef.current(paneId);

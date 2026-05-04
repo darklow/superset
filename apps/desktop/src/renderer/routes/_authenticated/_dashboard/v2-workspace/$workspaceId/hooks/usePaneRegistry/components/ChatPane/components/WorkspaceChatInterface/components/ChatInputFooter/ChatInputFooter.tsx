@@ -6,12 +6,12 @@ import {
 	usePromptInputController,
 } from "@superset/ui/ai-elements/prompt-input";
 import type { ThinkingLevel } from "@superset/ui/ai-elements/thinking-toggle";
+import { workspaceTrpc } from "@superset/workspace-client";
 import type { ChatStatus, FileUIPart } from "ai";
 import type React from "react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { QuestionInputOverlay } from "renderer/components/Chat/ChatInterface/components/ChatInputFooter/components/QuestionInputOverlay";
-import { IssueLinkCommand } from "renderer/components/Chat/ChatInterface/components/IssueLinkCommand";
 import { TiptapPromptEditor } from "renderer/components/Chat/ChatInterface/components/TiptapPromptEditor";
 import { useFocusPromptOnPane } from "renderer/components/Chat/ChatInterface/hooks/useFocusPromptOnPane";
 import type { SlashCommand } from "renderer/components/Chat/ChatInterface/hooks/useSlashCommands";
@@ -30,7 +30,6 @@ import type { LinkedIssue } from "./types";
 import { getErrorMessage } from "./utils/getErrorMessage";
 
 interface ChatInputFooterProps {
-	sessionId: string | null;
 	workspaceId: string;
 	cwd: string;
 	isFocused: boolean;
@@ -64,7 +63,6 @@ interface ChatInputFooterProps {
 }
 
 export function ChatInputFooter({
-	sessionId,
 	workspaceId,
 	cwd,
 	isFocused,
@@ -106,26 +104,33 @@ export function ChatInputFooter({
 		}
 	}, [pendingQuestion, textInput]);
 
-	const [issueLinkOpen, setIssueLinkOpen] = useState(false);
 	const [linkedIssues, setLinkedIssues] = useState<LinkedIssue[]>([]);
 	const inputRootRef = useRef<HTMLDivElement>(null);
 	const errorMessage = getErrorMessage(error);
 	const focusShortcutText = useHotkeyDisplay("FOCUS_CHAT_INPUT").text;
 	const showFocusHint = focusShortcutText !== "Unassigned";
 
-	const addLinkedIssue = useCallback(
-		(slug: string, title: string, taskId: string | undefined, url?: string) => {
-			setLinkedIssues((prev) => {
-				if (prev.some((issue) => issue.slug === slug)) return prev;
-				return [...prev, { slug, title, taskId, url }];
-			});
-		},
-		[],
-	);
-
 	const removeLinkedIssue = useCallback((slug: string) => {
 		setLinkedIssues((prev) => prev.filter((issue) => issue.slug !== slug));
 	}, []);
+
+	const trpcUtils = workspaceTrpc.useUtils();
+	const searchFiles = useCallback(
+		async (query: string) => {
+			const { matches } = await trpcUtils.filesystem.searchFiles.fetch({
+				workspaceId,
+				query,
+				includeHidden: false,
+				limit: 20,
+			});
+			return matches.map((m) => ({
+				id: m.absolutePath,
+				name: m.name,
+				relativePath: m.relativePath,
+			}));
+		},
+		[trpcUtils, workspaceId],
+	);
 
 	const handleSend = useCallback(
 		(message: PromptInputMessage) => {
@@ -188,15 +193,7 @@ export function ChatInputFooter({
 								maxFileSize={10 * 1024 * 1024}
 								globalDrop
 							>
-								<ChatShortcuts
-									isFocused={isFocused}
-									setIssueLinkOpen={setIssueLinkOpen}
-								/>
-								<IssueLinkCommand
-									open={issueLinkOpen}
-									onOpenChange={setIssueLinkOpen}
-									onSelect={addLinkedIssue}
-								/>
+								<ChatShortcuts isFocused={isFocused} />
 								<FileDropOverlay visible={dragType === "files"} />
 								<PromptInputAttachments>
 									{renderAttachment ??
@@ -207,12 +204,12 @@ export function ChatInputFooter({
 									onRemove={removeLinkedIssue}
 								/>
 								<SlashCommandPreview
-									sessionId={sessionId}
 									workspaceId={workspaceId}
 									slashCommands={slashCommands}
 								/>
 								<TiptapPromptEditor
 									cwd={cwd}
+									searchFiles={searchFiles}
 									slashCommands={slashCommands}
 									availableModels={availableModels}
 									placeholder="Ask to make changes, @mention files, run /commands"
@@ -231,7 +228,6 @@ export function ChatInputFooter({
 									submitStatus={submitStatus}
 									submitDisabled={submitDisabled}
 									onStop={onStop}
-									onLinkIssue={() => setIssueLinkOpen(true)}
 								/>
 							</PromptInput>
 						</div>

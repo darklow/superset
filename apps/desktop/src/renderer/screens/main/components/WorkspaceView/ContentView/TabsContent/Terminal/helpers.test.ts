@@ -48,8 +48,6 @@ const {
 	getDefaultTerminalTheme,
 	setupCopyHandler,
 	setupCopyOnSelect,
-	setupKeyboardHandler,
-	setupPasteHandler,
 } = await import("./helpers");
 
 describe("getDefaultTerminalTheme", () => {
@@ -128,93 +126,6 @@ describe("getDefaultTerminalBg", () => {
 
 	it("should return default background when no cache", () => {
 		expect(getDefaultTerminalBg()).toBe("#151110");
-	});
-});
-
-describe("setupKeyboardHandler", () => {
-	const originalNavigator = globalThis.navigator;
-
-	afterEach(() => {
-		// Restore navigator between tests
-		globalThis.navigator = originalNavigator;
-	});
-
-	it("maps Option+Left/Right to Meta+B/F on macOS", () => {
-		// @ts-expect-error - mocking navigator for tests
-		globalThis.navigator = { platform: "MacIntel" };
-
-		const captured: { handler: ((event: KeyboardEvent) => boolean) | null } = {
-			handler: null,
-		};
-		const xterm = {
-			attachCustomKeyEventHandler: (
-				next: (event: KeyboardEvent) => boolean,
-			) => {
-				captured.handler = next;
-			},
-		};
-
-		const onWrite = mock(() => {});
-		setupKeyboardHandler(xterm as unknown as XTerm, { onWrite });
-
-		captured.handler?.({
-			type: "keydown",
-			key: "ArrowLeft",
-			altKey: true,
-			metaKey: false,
-			ctrlKey: false,
-			shiftKey: false,
-		} as KeyboardEvent);
-		captured.handler?.({
-			type: "keydown",
-			key: "ArrowRight",
-			altKey: true,
-			metaKey: false,
-			ctrlKey: false,
-			shiftKey: false,
-		} as KeyboardEvent);
-
-		expect(onWrite).toHaveBeenCalledWith("\x1bb");
-		expect(onWrite).toHaveBeenCalledWith("\x1bf");
-	});
-
-	it("maps Ctrl+Left/Right to Meta+B/F on Windows", () => {
-		// @ts-expect-error - mocking navigator for tests
-		globalThis.navigator = { platform: "Win32" };
-
-		const captured: { handler: ((event: KeyboardEvent) => boolean) | null } = {
-			handler: null,
-		};
-		const xterm = {
-			attachCustomKeyEventHandler: (
-				next: (event: KeyboardEvent) => boolean,
-			) => {
-				captured.handler = next;
-			},
-		};
-
-		const onWrite = mock(() => {});
-		setupKeyboardHandler(xterm as unknown as XTerm, { onWrite });
-
-		captured.handler?.({
-			type: "keydown",
-			key: "ArrowLeft",
-			altKey: false,
-			metaKey: false,
-			ctrlKey: true,
-			shiftKey: false,
-		} as KeyboardEvent);
-		captured.handler?.({
-			type: "keydown",
-			key: "ArrowRight",
-			altKey: false,
-			metaKey: false,
-			ctrlKey: true,
-			shiftKey: false,
-		} as KeyboardEvent);
-
-		expect(onWrite).toHaveBeenCalledWith("\x1bb");
-		expect(onWrite).toHaveBeenCalledWith("\x1bf");
 	});
 });
 
@@ -328,104 +239,6 @@ describe("setupCopyHandler", () => {
 	});
 });
 
-describe("setupPasteHandler", () => {
-	function createXtermStub() {
-		const listeners = new Map<string, EventListener>();
-		const textarea = {
-			addEventListener: mock((eventName: string, listener: EventListener) => {
-				listeners.set(eventName, listener);
-			}),
-			removeEventListener: mock((eventName: string) => {
-				listeners.delete(eventName);
-			}),
-		} as unknown as HTMLTextAreaElement;
-		const paste = mock(() => {});
-		const xterm = {
-			textarea,
-			paste,
-		} as unknown as XTerm;
-		return { xterm, listeners, paste };
-	}
-
-	it("forwards Ctrl+V for image-only clipboard payloads", () => {
-		const { xterm, listeners } = createXtermStub();
-		const onWrite = mock(() => {});
-		setupPasteHandler(xterm, { onWrite });
-
-		const preventDefault = mock(() => {});
-		const stopImmediatePropagation = mock(() => {});
-		const pasteEvent = {
-			clipboardData: {
-				getData: mock(() => ""),
-				items: [{ kind: "file", type: "image/png" }],
-				types: ["Files", "image/png"],
-			},
-			preventDefault,
-			stopImmediatePropagation,
-		} as unknown as ClipboardEvent;
-
-		const pasteListener = listeners.get("paste");
-		expect(pasteListener).toBeDefined();
-		pasteListener?.(pasteEvent);
-
-		expect(onWrite).toHaveBeenCalledWith("\x16");
-		expect(preventDefault).toHaveBeenCalled();
-		expect(stopImmediatePropagation).toHaveBeenCalled();
-	});
-
-	it("forwards Ctrl+V for non-text clipboard payloads without plain text", () => {
-		const { xterm, listeners } = createXtermStub();
-		const onWrite = mock(() => {});
-		setupPasteHandler(xterm, { onWrite });
-
-		const preventDefault = mock(() => {});
-		const stopImmediatePropagation = mock(() => {});
-		const pasteEvent = {
-			clipboardData: {
-				getData: mock(() => ""),
-				items: [{ kind: "string", type: "text/html" }],
-				types: ["text/html"],
-			},
-			preventDefault,
-			stopImmediatePropagation,
-		} as unknown as ClipboardEvent;
-
-		const pasteListener = listeners.get("paste");
-		expect(pasteListener).toBeDefined();
-		pasteListener?.(pasteEvent);
-
-		expect(onWrite).toHaveBeenCalledWith("\x16");
-		expect(preventDefault).toHaveBeenCalled();
-		expect(stopImmediatePropagation).toHaveBeenCalled();
-	});
-
-	it("ignores empty clipboard payloads", () => {
-		const { xterm, listeners } = createXtermStub();
-		const onWrite = mock(() => {});
-		setupPasteHandler(xterm, { onWrite });
-
-		const preventDefault = mock(() => {});
-		const stopImmediatePropagation = mock(() => {});
-		const pasteEvent = {
-			clipboardData: {
-				getData: mock(() => ""),
-				items: [],
-				types: [],
-			},
-			preventDefault,
-			stopImmediatePropagation,
-		} as unknown as ClipboardEvent;
-
-		const pasteListener = listeners.get("paste");
-		expect(pasteListener).toBeDefined();
-		pasteListener?.(pasteEvent);
-
-		expect(onWrite).not.toHaveBeenCalled();
-		expect(preventDefault).not.toHaveBeenCalled();
-		expect(stopImmediatePropagation).not.toHaveBeenCalled();
-	});
-});
-
 describe("setupCopyOnSelect", () => {
 	const originalNavigator = globalThis.navigator;
 
@@ -513,8 +326,8 @@ describe("setupCopyOnSelect", () => {
 		cleanup();
 		await wait(200);
 
-		const disposable = (xterm.onSelectionChange as ReturnType<typeof mock>)
-			.mock.results[0]?.value;
+		const disposable = (xterm.onSelectionChange as ReturnType<typeof mock>).mock
+			.results[0]?.value;
 		expect(disposable.dispose).toHaveBeenCalled();
 		expect(writeText).not.toHaveBeenCalled();
 	});

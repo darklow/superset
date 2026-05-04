@@ -1,3 +1,4 @@
+import { chatServiceTrpc } from "@superset/chat/client";
 import {
 	PromptInput,
 	PromptInputAttachment,
@@ -14,7 +15,6 @@ import { useFocusPromptOnPane } from "renderer/components/Chat/ChatInterface/hoo
 import { useHotkeyDisplay } from "renderer/hotkeys";
 import type { SlashCommand } from "../../hooks/useSlashCommands";
 import type { ModelOption, PermissionMode } from "../../types";
-import { IssueLinkCommand } from "../IssueLinkCommand";
 import { TiptapPromptEditor } from "../TiptapPromptEditor";
 import { ChatComposerControls } from "./components/ChatComposerControls";
 import { ChatInputDropZone } from "./components/ChatInputDropZone";
@@ -50,6 +50,7 @@ interface ChatInputFooterProps {
 	pendingQuestion?: {
 		questionId: string;
 		question: string;
+		description?: string;
 		options?: { label: string; description?: string }[];
 	} | null;
 	isQuestionSubmitting?: boolean;
@@ -100,26 +101,43 @@ export function ChatInputFooter({
 		}
 	}, [pendingQuestion, textInput]);
 
-	const [issueLinkOpen, setIssueLinkOpen] = useState(false);
 	const [linkedIssues, setLinkedIssues] = useState<LinkedIssue[]>([]);
 	const inputRootRef = useRef<HTMLDivElement>(null);
 	const errorMessage = getErrorMessage(error);
 	const focusShortcutText = useHotkeyDisplay("FOCUS_CHAT_INPUT").text;
 	const showFocusHint = focusShortcutText !== "Unassigned";
 
-	const addLinkedIssue = useCallback(
-		(slug: string, title: string, taskId: string | undefined, url?: string) => {
-			setLinkedIssues((prev) => {
-				if (prev.some((issue) => issue.slug === slug)) return prev;
-				return [...prev, { slug, title, taskId, url }];
-			});
-		},
-		[],
-	);
-
 	const removeLinkedIssue = useCallback((slug: string) => {
 		setLinkedIssues((prev) => prev.filter((issue) => issue.slug !== slug));
 	}, []);
+
+	const trpcUtils = chatServiceTrpc.useUtils();
+	const searchFiles = useCallback(
+		async (query: string) => {
+			const results = await trpcUtils.workspace.searchFiles.fetch({
+				rootPath: cwd,
+				query,
+				includeHidden: false,
+				limit: 20,
+			});
+			return results.map((r) => ({
+				id: r.id,
+				name: r.name,
+				relativePath: r.relativePath,
+			}));
+		},
+		[trpcUtils, cwd],
+	);
+	const previewSlashCommand = useCallback(
+		async (text: string) => {
+			const result = await trpcUtils.workspace.previewSlashCommand.fetch({
+				cwd,
+				text,
+			});
+			return result ?? null;
+		},
+		[trpcUtils, cwd],
+	);
 
 	const handleSend = useCallback(
 		(message: PromptInputMessage) => {
@@ -176,15 +194,7 @@ export function ChatInputFooter({
 								maxFileSize={10 * 1024 * 1024}
 								globalDrop
 							>
-								<ChatShortcuts
-									isFocused={isFocused}
-									setIssueLinkOpen={setIssueLinkOpen}
-								/>
-								<IssueLinkCommand
-									open={issueLinkOpen}
-									onOpenChange={setIssueLinkOpen}
-									onSelect={addLinkedIssue}
-								/>
+								<ChatShortcuts isFocused={isFocused} />
 								<FileDropOverlay visible={dragType === "files"} />
 								<PromptInputAttachments>
 									{renderAttachment ??
@@ -196,6 +206,8 @@ export function ChatInputFooter({
 								/>
 								<TiptapPromptEditor
 									cwd={cwd}
+									searchFiles={searchFiles}
+									previewSlashCommand={previewSlashCommand}
 									slashCommands={slashCommands}
 									availableModels={availableModels}
 									placeholder="Ask to make changes, @mention files, run /commands"
@@ -217,7 +229,6 @@ export function ChatInputFooter({
 									submitStatus={submitStatus}
 									submitDisabled={submitDisabled}
 									onStop={onStop}
-									onLinkIssue={() => setIssueLinkOpen(true)}
 								/>
 							</PromptInput>
 						</div>
