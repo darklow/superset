@@ -88,6 +88,10 @@ export default defineConfig({
 				process.env.STREAMS_URL,
 				"https://superset-stream.fly.dev",
 			),
+			"process.env.DISABLE_AUTO_UPDATE": defineEnv(
+				process.env.DISABLE_AUTO_UPDATE,
+				"0",
+			),
 			"process.env.DESKTOP_VITE_PORT": defineEnv(process.env.DESKTOP_VITE_PORT),
 			"process.env.DESKTOP_NOTIFICATIONS_PORT": defineEnv(
 				process.env.DESKTOP_NOTIFICATIONS_PORT,
